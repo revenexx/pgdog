@@ -8,7 +8,7 @@ on:
 
 jobs:
   fmt:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
@@ -27,7 +27,7 @@ jobs:
         working-directory: pgdog
         run: cargo clippy
   build:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
@@ -45,7 +45,7 @@ jobs:
       - name: Check release
         run: cargo check --release
   tests:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
@@ -53,7 +53,7 @@ jobs:
           toolchain: stable
           override: true
           components: llvm-tools-preview
-      - uses: useblacksmith/rust-cache@v3
+      - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v1" # Change this when updating tooling
       - name: Setup PostgreSQL
@@ -93,7 +93,7 @@ jobs:
           flags: unit
           fail_ci_if_error: true
   integration:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       LLVM_PROFILE_FILE: ${{ github.workspace }}/target/llvm-cov-target/profiles/pgdog-%p-%m.profraw
@@ -104,7 +104,7 @@ jobs:
           toolchain: stable
           override: true
           components: llvm-tools-preview
-      - uses: useblacksmith/rust-cache@v3
+      - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: release-1
       - name: Setup dependencies
@@ -192,7 +192,7 @@ jobs:
           flags: integration
           fail_ci_if_error: true
   plugin-unit-tests:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 30
     steps:
@@ -201,7 +201,7 @@ jobs:
         with:
           toolchain: stable
           override: true
-      - uses: useblacksmith/rust-cache@v3
+      - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "plugin-unit-v1"
       - name: Install CMake 3.31
@@ -215,7 +215,7 @@ jobs:
       - name: Run plugin unit tests
         run: cargo nextest run -E 'package(pgdog-example-plugin)' --no-fail-fast
   plugin-integration-tests:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 30
     steps:
@@ -224,7 +224,7 @@ jobs:
         with:
           toolchain: stable
           override: true
-      - uses: useblacksmith/rust-cache@v3
+      - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "plugin-integration-v1"
       - name: Setup PostgreSQL
