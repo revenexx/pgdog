@@ -29,6 +29,7 @@ mod set_schema_sharding;
 mod sharded;
 mod spliced;
 mod transaction_state;
+mod wildcard;
 
 pub(super) fn test_client() -> Client {
     load_test();

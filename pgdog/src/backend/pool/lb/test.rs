@@ -32,7 +32,7 @@ fn create_test_pool_config(host: &str, port: u16) -> PoolConfig {
 
 fn setup_test_replicas() -> LoadBalancer {
     let pool_config1 = create_test_pool_config("127.0.0.1", 5432);
-    let pool_config2 = create_test_pool_config("localhost", 5432);
+    let pool_config2 = create_test_pool_config("127.0.0.1", 5432);
 
     let replicas = LoadBalancer::new(
         &None,
@@ -170,7 +170,7 @@ async fn test_primary_pool_banning() {
     let primary_pool = Pool::new(&primary_config);
     primary_pool.launch();
 
-    let replica_configs = [create_test_pool_config("localhost", 5432)];
+    let replica_configs = [create_test_pool_config("127.0.0.1", 5432)];
 
     let replicas = LoadBalancer::new(
         &Some(primary_pool),
@@ -324,7 +324,7 @@ async fn test_read_write_split_exclude_primary() {
     primary_pool.launch();
 
     let replica_configs = [
-        create_test_pool_config("localhost", 5432),
+        create_test_pool_config("127.0.0.1", 5432),
         create_test_pool_config("127.0.0.1", 5432),
     ];
 
@@ -362,7 +362,7 @@ async fn test_read_write_split_include_primary() {
     let primary_pool = Pool::new(&primary_config);
     primary_pool.launch();
 
-    let replica_configs = [create_test_pool_config("localhost", 5432)];
+    let replica_configs = [create_test_pool_config("127.0.0.1", 5432)];
 
     let replicas = LoadBalancer::new(
         &Some(primary_pool),
@@ -432,7 +432,7 @@ async fn test_read_write_split_exclude_primary_no_replicas() {
 async fn test_read_write_split_exclude_primary_no_primary() {
     // Test exclude primary setting when no primary exists
     let replica_configs = [
-        create_test_pool_config("localhost", 5432),
+        create_test_pool_config("127.0.0.1", 5432),
         create_test_pool_config("127.0.0.1", 5432),
     ];
 
@@ -462,7 +462,7 @@ async fn test_read_write_split_exclude_primary_no_primary() {
 async fn test_read_write_split_include_primary_no_primary() {
     // Test include primary setting when no primary exists
     let replica_configs = [
-        create_test_pool_config("localhost", 5432),
+        create_test_pool_config("127.0.0.1", 5432),
         create_test_pool_config("127.0.0.1", 5432),
     ];
 
@@ -495,7 +495,7 @@ async fn test_read_write_split_with_banned_primary() {
     let primary_pool = Pool::new(&primary_config);
     primary_pool.launch();
 
-    let replica_configs = [create_test_pool_config("localhost", 5432)];
+    let replica_configs = [create_test_pool_config("127.0.0.1", 5432)];
 
     let replicas = LoadBalancer::new(
         &Some(primary_pool),
@@ -535,7 +535,7 @@ async fn test_read_write_split_with_banned_replicas() {
     let primary_pool = Pool::new(&primary_config);
     primary_pool.launch();
 
-    let replica_configs = [create_test_pool_config("localhost", 5432)];
+    let replica_configs = [create_test_pool_config("127.0.0.1", 5432)];
 
     let replicas = LoadBalancer::new(
         &Some(primary_pool),
@@ -576,7 +576,7 @@ async fn test_read_write_split_exclude_primary_with_round_robin() {
     primary_pool.launch();
 
     let replica_configs = [
-        create_test_pool_config("localhost", 5432),
+        create_test_pool_config("127.0.0.1", 5432),
         create_test_pool_config("127.0.0.1", 5432),
     ];
 
@@ -623,7 +623,7 @@ async fn test_read_write_split_exclude_primary_with_round_robin() {
 #[tokio::test]
 async fn test_monitor_shuts_down_on_notify() {
     let pool_config1 = create_test_pool_config("127.0.0.1", 5432);
-    let pool_config2 = create_test_pool_config("localhost", 5432);
+    let pool_config2 = create_test_pool_config("127.0.0.1", 5432);
 
     let replicas = LoadBalancer::new(
         &None,
@@ -742,7 +742,7 @@ async fn test_monitor_does_not_ban_with_zero_ban_timeout() {
 
     let pool_config2 = PoolConfig {
         address: Address {
-            host: "localhost".into(),
+            host: "127.0.0.1".into(),
             port: 5432,
             user: "pgdog".into(),
             password: "pgdog".into(),
@@ -813,7 +813,7 @@ async fn test_include_primary_if_replica_banned_no_bans() {
     let primary_pool = Pool::new(&primary_config);
     primary_pool.launch();
 
-    let replica_configs = [create_test_pool_config("localhost", 5432)];
+    let replica_configs = [create_test_pool_config("127.0.0.1", 5432)];
 
     let replicas = LoadBalancer::new(
         &Some(primary_pool),
@@ -849,7 +849,7 @@ async fn test_include_primary_if_replica_banned_with_ban() {
     let primary_pool = Pool::new(&primary_config);
     primary_pool.launch();
 
-    let replica_configs = [create_test_pool_config("localhost", 5432)];
+    let replica_configs = [create_test_pool_config("127.0.0.1", 5432)];
 
     let replicas = LoadBalancer::new(
         &Some(primary_pool),
@@ -898,7 +898,7 @@ async fn test_has_replicas_with_primary_and_replicas() {
     let primary_pool = Pool::new(&primary_config);
     primary_pool.launch();
 
-    let replica_configs = [create_test_pool_config("localhost", 5432)];
+    let replica_configs = [create_test_pool_config("127.0.0.1", 5432)];
 
     let lb = LoadBalancer::new(
         &Some(primary_pool),
@@ -978,7 +978,7 @@ async fn test_set_role() {
 #[tokio::test]
 async fn test_can_move_conns_to_same_config() {
     let pool_config1 = create_test_pool_config("127.0.0.1", 5432);
-    let pool_config2 = create_test_pool_config("localhost", 5432);
+    let pool_config2 = create_test_pool_config("127.0.0.1", 5432);
 
     let lb1 = LoadBalancer::new(
         &None,
@@ -1000,7 +1000,7 @@ async fn test_can_move_conns_to_same_config() {
 #[tokio::test]
 async fn test_can_move_conns_to_different_count() {
     let pool_config1 = create_test_pool_config("127.0.0.1", 5432);
-    let pool_config2 = create_test_pool_config("localhost", 5432);
+    let pool_config2 = create_test_pool_config("127.0.0.1", 5432);
 
     let lb1 = LoadBalancer::new(
         &None,
@@ -1022,7 +1022,7 @@ async fn test_can_move_conns_to_different_count() {
 #[tokio::test]
 async fn test_can_move_conns_to_different_addresses() {
     let pool_config1 = create_test_pool_config("127.0.0.1", 5432);
-    let pool_config2 = create_test_pool_config("localhost", 5432);
+    let pool_config2 = create_test_pool_config("127.0.0.1", 5432);
     let pool_config3 = create_test_pool_config("127.0.0.1", 5433);
 
     let lb1 = LoadBalancer::new(
@@ -1229,7 +1229,7 @@ async fn test_weighted_round_robin_proportional_distribution() {
 #[tokio::test]
 async fn test_least_active_connections_prefers_pool_with_fewer_checked_out() {
     let pool_config1 = create_test_pool_config("127.0.0.1", 5432);
-    let pool_config2 = create_test_pool_config("localhost", 5432);
+    let pool_config2 = create_test_pool_config("127.0.0.1", 5432);
 
     let replicas = LoadBalancer::new(
         &None,
@@ -1265,7 +1265,7 @@ async fn test_least_active_connections_prefers_pool_with_fewer_checked_out() {
 
 fn setup_test_replicas_no_launch() -> LoadBalancer {
     let pool_config1 = create_test_pool_config("127.0.0.1", 5432);
-    let pool_config2 = create_test_pool_config("localhost", 5432);
+    let pool_config2 = create_test_pool_config("127.0.0.1", 5432);
 
     LoadBalancer::new(
         &None,
@@ -1515,7 +1515,7 @@ fn test_ban_check_does_not_ban_with_zero_ban_timeout() {
 
     let pool_config2 = PoolConfig {
         address: Address {
-            host: "localhost".into(),
+            host: "127.0.0.1".into(),
             port: 5432,
             user: "pgdog".into(),
             password: "pgdog".into(),

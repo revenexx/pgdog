@@ -258,6 +258,16 @@ impl User {
             ..Default::default()
         }
     }
+
+    /// Whether this user entry has a wildcard name (`name = "*"`).
+    pub fn is_wildcard_name(&self) -> bool {
+        self.name == "*"
+    }
+
+    /// Whether this user entry has a wildcard database (`database = "*"`).
+    pub fn is_wildcard_database(&self) -> bool {
+        self.database == "*"
+    }
 }
 
 /// Admin database settings control access to the [admin](https://docs.pgdog.dev/administration/) database which contains real time statistics about internal operations of PgDog.
@@ -526,5 +536,29 @@ server_iam_region = "us-east-1"
         let user = users.users.first().unwrap();
         assert_eq!(user.server_auth, ServerAuth::RdsIam);
         assert_eq!(user.server_iam_region.as_deref(), Some("us-east-1"));
+    }
+
+    #[test]
+    fn test_user_wildcard_name() {
+        let mut user = User::default();
+        assert!(!user.is_wildcard_name());
+
+        user.name = "alice".to_string();
+        assert!(!user.is_wildcard_name());
+
+        user.name = "*".to_string();
+        assert!(user.is_wildcard_name());
+    }
+
+    #[test]
+    fn test_user_wildcard_database() {
+        let mut user = User::default();
+        assert!(!user.is_wildcard_database());
+
+        user.database = "mydb".to_string();
+        assert!(!user.is_wildcard_database());
+
+        user.database = "*".to_string();
+        assert!(user.is_wildcard_database());
     }
 }

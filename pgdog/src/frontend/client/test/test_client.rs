@@ -1,6 +1,8 @@
 use std::{fmt::Debug, ops::Deref};
 
 use bytes::{BufMut, Bytes, BytesMut};
+use once_cell::sync::Lazy;
+use parking_lot::{Mutex, MutexGuard};
 use pgdog_config::RewriteMode;
 use rand::{rng, Rng};
 use tokio::{
@@ -10,7 +12,7 @@ use tokio::{
 
 use crate::{
     backend::databases::{reload_from_existing, shutdown},
-    config::{config, load_test_replicas, load_test_sharded, set},
+    config::{config, load_test_replicas, load_test_sharded, load_test_wildcard, set},
     frontend::{
         client::query_engine::QueryEngine,
         router::{parser::Shard, sharding::ContextBuilder},
@@ -108,11 +110,14 @@ async fn new_client_pair(params: Parameters) -> (TcpStream, Client) {
 /// Test client.
 #[derive(Debug)]
 pub struct TestClient {
+    _test_guard: MutexGuard<'static, ()>,
     pub(crate) client: Client,
     pub(crate) engine: QueryEngine,
     pub(crate) conn: TcpStream,
     pub(crate) leak_pool: bool,
 }
+
+static TEST_CLIENT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 impl TestClient {
     /// Create new test client after the login phase
@@ -124,6 +129,7 @@ impl TestClient {
         let (conn, client) = new_client_pair(params).await;
 
         Self {
+            _test_guard: test_guard,
             conn,
             engine: QueryEngine::from_client(&client).expect("create query engine from client"),
             client,
@@ -145,6 +151,13 @@ impl TestClient {
     /// New client with replicas but not sharded.
     pub(crate) async fn new_replicas(params: Parameters) -> Self {
         load_test_replicas();
+        Self::new(params).await
+    }
+
+    /// New client with wildcard database configuration.
+    #[allow(dead_code)]
+    pub(crate) async fn new_wildcard(params: Parameters) -> Self {
+        load_test_wildcard();
         Self::new(params).await
     }
 
