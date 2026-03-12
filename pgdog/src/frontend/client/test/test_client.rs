@@ -117,6 +117,9 @@ pub struct TestClient {
     pub(crate) leak_pool: bool,
 }
 
+/// Serialises test-client construction so tests that mutate the global
+/// database/config state don't interfere with each other. Each `TestClient`
+/// holds the guard for its lifetime, preventing concurrent state corruption.
 static TEST_CLIENT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 impl TestClient {

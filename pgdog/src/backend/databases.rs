@@ -322,8 +322,10 @@ pub(crate) fn add_wildcard_pool(
             .cloned()
     } else {
         // Use an existing user config's settings from a template pool.
-        let template_cluster = dbs.databases.get(&template_user_key);
-        template_cluster.map(|_| {
+        if !dbs.databases.contains_key(&template_user_key) {
+            return Ok(None);
+        }
+        Some(
             // Use the snapshot so user lookups are consistent with the database
             // config captured at the same instant (avoids a race if a SIGHUP
             // reload changes the global config mid-call).
@@ -333,8 +335,8 @@ pub(crate) fn add_wildcard_pool(
                 .iter()
                 .find(|u| u.name == user && (u.database == "*" || u.is_wildcard_database()))
                 .cloned()
-                .unwrap_or_else(|| crate::config::User::new(user, "", database))
-        })
+                .unwrap_or_else(|| crate::config::User::new(user, "", database)),
+        )
     };
 
     let mut user_config = match user_config {
