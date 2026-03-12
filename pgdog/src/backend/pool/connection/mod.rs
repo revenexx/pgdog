@@ -335,7 +335,8 @@ impl Connection {
                 let databases = databases();
                 let cluster = match databases.cluster(user) {
                     Ok(c) => c,
-                    Err(_) => {
+                    Err(e) => {
+                        debug!("cluster lookup failed, attempting wildcard pool creation: {e}");
                         // Drop the Arc before mutating global state.
                         drop(databases);
                         // Attempt wildcard pool creation.
@@ -367,7 +368,7 @@ impl Connection {
                     .flatten()
                     .unwrap_or(&[])
                     .iter()
-                    .map(|dest_cluster: &Cluster| {
+                    .map(|dest_cluster| {
                         let mirror_config = databases.mirror_config(source_db, dest_cluster.name());
                         Mirror::spawn(source_db, dest_cluster, mirror_config)
                     })
