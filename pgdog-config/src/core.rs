@@ -457,7 +457,12 @@ impl Config {
             }
         }
 
-        if wildcard_db_count > 2 {
+        let all_wildcard_auto = self
+            .databases
+            .iter()
+            .filter(|d| d.is_wildcard())
+            .all(|d| d.role == Role::Auto);
+        if wildcard_db_count > 2 && !all_wildcard_auto {
             warn!(
                 r#"multiple wildcard "*" database entries detected ({} entries), only one primary and one replica are expected"#,
                 wildcard_db_count

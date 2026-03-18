@@ -918,6 +918,9 @@ pub fn from_config(config: &ConfigAndUsers) -> Databases {
         };
 
         for user in users {
+            if user.is_wildcard_name() || user.is_wildcard_database() {
+                continue;
+            }
             if let Some((user, cluster)) = new_pool(&user, &config.config) {
                 databases.insert(user, cluster);
             }
@@ -2191,6 +2194,66 @@ password = "testpass"
         assert_eq!(databases.wildcard_users().len(), 1);
         assert!(databases.wildcard_users()[0].is_wildcard_name());
         assert!(databases.wildcard_users()[0].is_wildcard_database());
+        assert!(databases.config_snapshot().is_some());
+    }
+
+    #[test]
+    fn test_wildcard_users_excluded_from_startup_pools() {
+        let mut config = Config::default();
+        config.databases = vec![
+            Database {
+                name: "explicit_db".to_string(),
+                host: "127.0.0.1".to_string(),
+                port: 5432,
+                role: Role::Primary,
+                ..Default::default()
+            },
+            Database {
+                name: "*".to_string(),
+                host: "127.0.0.1".to_string(),
+                port: 5432,
+                role: Role::Primary,
+                ..Default::default()
+            },
+        ];
+
+        let config_and_users = ConfigAndUsers {
+            config,
+            users: crate::config::Users {
+                users: vec![
+                    crate::config::User::new("alice", "pass", "explicit_db"),
+                    crate::config::User {
+                        name: "bob".to_string(),
+                        database: "*".to_string(),
+                        password: Some("pass".to_string()),
+                        ..Default::default()
+                    },
+                    crate::config::User {
+                        name: "*".to_string(),
+                        database: "*".to_string(),
+                        password: Some("wild".to_string()),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let databases = from_config(&config_and_users);
+
+        // Explicit pool exists.
+        assert!(databases.cluster(("alice", "explicit_db")).is_ok());
+
+        // No pool created for wildcard database user "bob/*".
+        assert!(databases.cluster(("bob", "*")).is_err());
+
+        // No pool created for full wildcard user "*/*".
+        assert!(databases.cluster(("*", "*")).is_err());
+
+        // Templates are still available for on-demand creation.
+        assert!(databases.has_wildcard());
+        assert!(databases.wildcard_db_templates().is_some());
         assert!(databases.config_snapshot().is_some());
     }
 
