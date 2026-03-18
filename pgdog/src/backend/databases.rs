@@ -275,20 +275,6 @@ pub(crate) fn add_wildcard_pool(
         return Ok(None);
     }
 
-    // Build a synthetic user config from the wildcard template.
-    let template_user_key = User {
-        user: if wildcard_match.wildcard_user {
-            "*".to_string()
-        } else {
-            user.to_string()
-        },
-        database: if wildcard_match.wildcard_database {
-            "*".to_string()
-        } else {
-            database.to_string()
-        },
-    };
-
     // Find the user template from wildcard_users or from the existing pool configs.
     let user_config = if wildcard_match.wildcard_user {
         // Look for a wildcard user template that matches.
@@ -304,22 +290,23 @@ pub(crate) fn add_wildcard_pool(
             })
             .cloned()
     } else {
-        // Use an existing user config's settings from a template pool.
-        if !dbs.databases.contains_key(&template_user_key) {
-            return Ok(None);
-        }
-        Some(
-            // Use the snapshot so user lookups are consistent with the database
-            // config captured at the same instant (avoids a race if a SIGHUP
-            // reload changes the global config mid-call).
-            config_snapshot
-                .users
-                .users
-                .iter()
-                .find(|u| u.name == user && (u.database == "*" || u.is_wildcard_database()))
-                .cloned()
-                .unwrap_or_else(|| crate::config::User::new(user, "", database)),
-        )
+        // Look up the user template from the config snapshot or wildcard_users.
+        // After the startup-skip fix, wildcard user entries (database="*") are
+        // no longer in dbs.databases, so we must search the config directly.
+        let from_config = config_snapshot
+            .users
+            .users
+            .iter()
+            .find(|u| u.name == user && (u.database == "*" || u.is_wildcard_database()))
+            .cloned();
+
+        let from_wildcard = dbs
+            .wildcard_users()
+            .iter()
+            .find(|u| u.name == user && (u.database == "*" || u.is_wildcard_database()))
+            .cloned();
+
+        from_config.or(from_wildcard)
     };
 
     let mut user_config = match user_config {
