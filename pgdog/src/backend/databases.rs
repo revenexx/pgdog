@@ -588,12 +588,14 @@ impl Databases {
     /// Find a wildcard match for a user/database pair.
     /// Returns a tuple of (user_template, is_wildcard_user, is_wildcard_db).
     fn find_wildcard_match(&self, user: &str, database: &str) -> Option<WildcardMatch> {
-        // Priority 1: exact user, wildcard database
-        let user_key = User {
-            user: user.to_string(),
-            database: "*".to_string(),
+        let has_wildcard_user = |u: &str, db: &str| {
+            self.wildcard_users
+                .iter()
+                .any(|wu| wu.name == u && wu.database == db)
         };
-        if self.databases.contains_key(&user_key) && self.wildcard_db_templates.is_some() {
+
+        // Priority 1: exact user, wildcard database
+        if has_wildcard_user(user, "*") && self.wildcard_db_templates.is_some() {
             return Some(WildcardMatch {
                 wildcard_user: false,
                 wildcard_database: true,
@@ -601,11 +603,7 @@ impl Databases {
         }
 
         // Priority 2: wildcard user, exact database
-        let wildcard_user_key = User {
-            user: "*".to_string(),
-            database: database.to_string(),
-        };
-        if self.databases.contains_key(&wildcard_user_key) {
+        if has_wildcard_user("*", database) {
             return Some(WildcardMatch {
                 wildcard_user: true,
                 wildcard_database: false,
@@ -613,11 +611,7 @@ impl Databases {
         }
 
         // Priority 3: both wildcard
-        let full_wildcard_key = User {
-            user: "*".to_string(),
-            database: "*".to_string(),
-        };
-        if self.databases.contains_key(&full_wildcard_key)
+        if has_wildcard_user("*", "*")
             || (!self.wildcard_users.is_empty() && self.wildcard_db_templates.is_some())
         {
             return Some(WildcardMatch {
