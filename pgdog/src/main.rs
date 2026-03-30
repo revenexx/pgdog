@@ -120,6 +120,10 @@ async fn pgdog(command: Option<Commands>) -> Result<(), Box<dyn std::error::Erro
     // Load databases and connect if needed.
     databases::init()?;
 
+    // Detect primary/replica roles before accepting clients.
+    // With role=auto, this prevents writes from hitting replicas on cold start.
+    databases::detect_roles_on_startup().await;
+
     let general = &config::config().config.general;
 
     if let Some(broadcast_addr) = general.broadcast_address {

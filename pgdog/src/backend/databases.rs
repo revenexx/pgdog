@@ -35,6 +35,21 @@ use super::{
 static DATABASES: Lazy<ArcSwap<Databases>> =
     Lazy::new(|| ArcSwap::from_pointee(Databases::default()));
 static LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+/// Cached role detection results from startup.
+/// Maps (host, port) → is_replica. Populated by detect_roles_on_startup()
+/// and read by LoadBalancer::new() to assign correct initial roles.
+static STARTUP_ROLES: Lazy<parking_lot::RwLock<HashMap<(String, u16), bool>>> =
+    Lazy::new(|| parking_lot::RwLock::new(HashMap::new()));
+
+/// Check if a server was identified as a replica during startup detection.
+/// Returns None if detection hasn't run or this server wasn't checked.
+pub fn startup_role(host: &str, port: u16) -> Option<bool> {
+    STARTUP_ROLES
+        .read()
+        .get(&(host.to_string(), port))
+        .copied()
+}
 /// Spawns the wildcard-pool background eviction loop exactly once.
 static WILDCARD_EVICTION: Lazy<()> = Lazy::new(|| {
     tokio::spawn(async {
@@ -125,6 +140,129 @@ pub fn init() -> Result<(), Error> {
     let _ = &*WILDCARD_EVICTION;
 
     Ok(())
+}
+
+/// Detect primary/replica roles for all shards before accepting client connections.
+///
+/// With `role = "auto"`, servers start as replicas by default. Without this pre-check,
+/// the first client queries may be routed to a replica and fail with
+/// "cannot execute UPDATE in a read-only transaction".
+///
+/// This function connects to each backend, runs `SELECT pg_is_in_recovery()` via the
+/// pool's existing LSN monitor infrastructure, and calls `redetect_roles()` to assign
+/// the correct roles. It should be called once after `init()` and before the client
+/// listener starts.
+pub async fn detect_roles_on_startup() {
+    use crate::backend::pool::Address;
+    use crate::backend::Server;
+    use crate::config::Role;
+
+    let cfg = config();
+    let general = &cfg.config.general;
+
+    // Collect unique (host, port) pairs with role=auto from all database entries.
+    let mut backends: Vec<(String, u16)> = Vec::new();
+    for db in &cfg.config.databases {
+        if db.role != Role::Auto {
+            continue;
+        }
+        let key = (db.host.clone(), db.port);
+        if !backends.contains(&key) {
+            backends.push(key);
+        }
+    }
+
+    if backends.is_empty() {
+        return;
+    }
+
+    // Collect users with passwords to try for authentication.
+    let users_with_passwords: Vec<_> = cfg
+        .users
+        .users
+        .iter()
+        .filter(|u| u.password.is_some())
+        .collect();
+
+    if users_with_passwords.is_empty() {
+        info!("startup role detection: no user with password found, skipping");
+        return;
+    }
+
+    info!(
+        "startup role detection: checking {} backend(s)",
+        backends.len()
+    );
+
+    let mut results = STARTUP_ROLES.write();
+
+    for (host, port) in &backends {
+        let mut detected = false;
+
+        // Try each user until one succeeds (not all users may have backend access).
+        for user in &users_with_passwords {
+            let addr = Address {
+                host: host.clone(),
+                port: *port,
+                database_name: "postgres".to_string(),
+                user: user.name.clone(),
+                password: user.password.clone().unwrap_or_default(),
+                server_auth: user.server_auth,
+                server_iam_region: None,
+                database_number: 0,
+            };
+
+            match tokio::time::timeout(
+                Duration::from_millis(general.connect_timeout),
+                Server::connect(&addr, Default::default(), Default::default()),
+            )
+            .await
+            {
+                Ok(Ok(mut server)) => {
+                    match server
+                        .fetch_all::<crate::net::DataRow>(
+                            "SELECT pg_is_in_recovery() AS replica",
+                        )
+                        .await
+                    {
+                        Ok(rows) => {
+                            if let Some(row) = rows.into_iter().next() {
+                                use pgdog_postgres_types::Format;
+                                let is_replica: bool =
+                                    row.get(0, Format::Text).unwrap_or(true);
+                                info!(
+                                    "startup role detection: {}:{} is {}",
+                                    host,
+                                    port,
+                                    if is_replica { "replica" } else { "primary" }
+                                );
+                                results.insert((host.clone(), *port), is_replica);
+                                detected = true;
+                                break;
+                            }
+                        }
+                        Err(_) => continue,
+                    }
+                }
+                Ok(Err(_)) => continue,
+                Err(_) => continue,
+            }
+        }
+
+        if !detected {
+            warn!(
+                "startup role detection: could not detect role for {}:{} (all users failed)",
+                host, port
+            );
+        }
+    }
+
+    let primary_count = results.values().filter(|&&r| !r).count();
+    let replica_count = results.values().filter(|&&r| r).count();
+    info!(
+        "startup role detection completed: {} primary, {} replica(s)",
+        primary_count, replica_count
+    );
 }
 
 /// Remove dynamically-created wildcard pools that currently have zero connections.

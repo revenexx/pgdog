@@ -75,7 +75,7 @@ impl Target {
 #[derive(Clone, Default, Debug)]
 pub struct LoadBalancer {
     /// Read/write targets.
-    pub(super) targets: Vec<Target>,
+    pub targets: Vec<Target>,
     /// Checkout timeout.
     pub(super) checkout_timeout: Duration,
     /// Round robin atomic counter.
@@ -107,7 +107,25 @@ impl LoadBalancer {
 
         let mut targets: Vec<_> = addrs
             .iter()
-            .map(|config| Target::new(Pool::new(config), Role::Replica))
+            .map(|config| {
+                let pool = Pool::new(config);
+                // Use cached startup detection to assign correct initial role.
+                // Without this, all auto-role servers start as Replica and writes
+                // fail until the async LSN monitor detects the primary (~20-30s).
+                let role = if config.config.role_detection {
+                    match crate::backend::databases::startup_role(
+                        &config.address.host,
+                        config.address.port,
+                    ) {
+                        Some(true) => Role::Replica,
+                        Some(false) => Role::Primary,
+                        None => Role::Replica, // fallback: detection not run yet
+                    }
+                } else {
+                    Role::Replica
+                };
+                Target::new(pool, role)
+            })
             .collect();
 
         let primary_target = primary
@@ -199,6 +217,11 @@ impl LoadBalancer {
     /// Check that the load balancer targets are all launched.
     pub fn online(&self) -> bool {
         self.targets.iter().all(|target| target.pool.lock().online)
+    }
+
+    /// Returns true if any target has role detection enabled.
+    pub fn has_role_detection(&self) -> bool {
+        self.targets.iter().any(|t| t.pool.config().role_detection)
     }
 
     /// Get a live connection from the pool.
