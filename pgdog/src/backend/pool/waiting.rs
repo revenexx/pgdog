@@ -1,7 +1,14 @@
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
+
 use crate::backend::Server;
+use tracing::error;
 
 use super::{Error, Guard, Pool, Request};
-use tokio::{sync::oneshot::*, time::Instant};
+use tokio::{sync::oneshot::{error::RecvError, *}, time::Instant};
 
 pub(super) struct Waiting {
     pool: Pool,
@@ -14,6 +21,75 @@ impl Drop for Waiting {
     fn drop(&mut self) {
         if self.waiting {
             self.pool.lock().remove_waiter(&self.request.id);
+        }
+    }
+}
+
+/// Wraps a connection receiver to safely handle future cancellation.
+///
+/// # The Race Condition
+///
+/// When `put()` dispatches a connection to a waiting client, it:
+/// 1. Pops the waiter from the queue
+/// 2. Calls `taken.take()` (taken++)
+/// 3. Sends the `Box<Server>` via the oneshot channel (`tx.send(Ok(conn))`)
+///
+/// If the outer `pool.get()` timeout fires *after* step 3 but *before* `rx.await`
+/// completes in `wait()`, Tokio cancels the `get_internal` future. This drops the
+/// local `rx` (Receiver), which also drops any value already sitting in the channel.
+/// The `Box<Server>` is freed (TCP connection closed) — but `pool.checkin()` is
+/// **never called**, so the `taken` entry remains permanently as a "phantom".
+///
+/// After `max_pool_size` phantom entries accumulate the pool is full and every
+/// subsequent `pool.get()` times out immediately.
+///
+/// # The Fix
+///
+/// `CancellationSafeRx` is armed on creation. When polled to completion it
+/// disarms itself so its `Drop` is a no-op. If it is dropped while still armed
+/// (i.e. the future was cancelled mid-wait), it calls `try_recv()` on the inner
+/// channel: if a `Box<Server>` is already there it calls `pool.checkin()` which
+/// removes the phantom `taken` entry and returns the connection to the pool.
+struct CancellationSafeRx {
+    rx: Receiver<Result<Box<Server>, Error>>,
+    pool: Pool,
+    armed: bool,
+}
+
+impl Drop for CancellationSafeRx {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        // The future was cancelled while still waiting. Check whether put() had
+        // already sent a connection into the channel (and registered it in taken).
+        // If so, return it to the pool to avoid a phantom taken entry.
+        match self.rx.try_recv() {
+            Ok(Ok(server)) => {
+                if let Err(err) = self.pool.checkin(server) {
+                    error!("pool checkin error on waiter cancellation: {}", err);
+                }
+            }
+            // Empty (connection not yet sent) or Error (pool sent an error,
+            // no Box<Server> involved) — nothing to recover.
+            _ => {}
+        }
+    }
+}
+
+impl Future for CancellationSafeRx {
+    // Tokio oneshot output: Result<T, RecvError>
+    type Output = Result<Result<Box<Server>, Error>, RecvError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Receiver<T>: Unpin, so Pin::new is safe.
+        match Pin::new(&mut self.rx).poll(cx) {
+            Poll::Ready(result) => {
+                // Value received successfully — disarm so Drop is a no-op.
+                self.armed = false;
+                Poll::Ready(result)
+            }
+            Poll::Pending => Poll::Pending,
         }
     }
 }
@@ -53,10 +129,21 @@ impl Waiting {
     pub(super) async fn wait(&mut self) -> Result<(Guard, Instant), Error> {
         let rx = self.rx.take().expect("waiter rx taken");
 
-        // Can be cancelled. Drop will remove the waiter from the queue.
-        let server = rx.await;
+        // Wrap in CancellationSafeRx to close the race between put() sending a
+        // connection (taken++) and a checkout timeout dropping the receiver before
+        // it is read. See CancellationSafeRx documentation for details.
+        let safe_rx = CancellationSafeRx {
+            rx,
+            pool: self.pool.clone(),
+            armed: true,
+        };
 
-        // Disarm the guard. We can't be cancelled beyond this point.
+        // Cancellation point: if the outer pool.get() timeout fires here,
+        // CancellationSafeRx::drop() recovers any in-flight connection.
+        let server = safe_rx.await;
+
+        // Disarm the guard (poll() already did this on success, but be explicit).
+        // We cannot be cancelled beyond this point.
         self.waiting = false;
 
         let now = Instant::now();
