@@ -173,7 +173,7 @@ impl Client {
             if !exists && !wildcard_available {
                 let user = user_from_params(&params, &password).ok();
                 if let Some(user) = user {
-                    databases::add(user);
+                    databases::add(user)?;
                 }
             }
             password.password().map(|p| p.to_owned())
@@ -182,7 +182,7 @@ impl Client {
         };
 
         // Get server parameters and send them to the client.
-        let mut conn = match Connection::new(user, database, admin, &passthrough_password) {
+        let mut conn = match Connection::new(user, database, admin) {
             Ok(conn) => conn,
             Err(_) => {
                 stream.fatal(ErrorResponse::auth(user, database)).await?;

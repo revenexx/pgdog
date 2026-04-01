@@ -1,6 +1,6 @@
 //! Databases behind pgDog.
 
-use std::collections::{hash_map::Entry, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
@@ -516,9 +516,9 @@ pub(crate) fn add_wildcard_pool(
             user, database
         );
 
-        let databases = (*databases()).clone();
-        let (added, mut databases) = databases.add(pool_user.clone(), cluster.clone());
-        if added {
+        let mut databases = (*databases()).clone();
+        if !databases.databases.contains_key(&pool_user) {
+            databases.databases.insert(pool_user.clone(), cluster.clone());
             databases.wildcard_pool_count += 1;
             databases.dynamic_pools.insert(pool_user);
             databases.launch();
@@ -691,6 +691,11 @@ impl Databases {
         } else {
             None
         }
+    }
+
+    /// Check if a cluster exists for the given user/database pair.
+    pub fn exists(&self, user: impl ToUser) -> bool {
+        self.databases.contains_key(&user.to_user())
     }
 
     /// Check if any wildcard templates are configured.

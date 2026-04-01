@@ -314,67 +314,64 @@ impl Connection {
 
     /// Fetch the cluster from the global database store.
     fn reload(&mut self) -> Result<(), Error> {
-        match self.binding {
-            Binding::Direct(_) | Binding::MultiShard(_, _) => {
-                let user = (self.user.as_str(), self.database.as_str());
-                // Check passthrough auth.
-                if config().config.general.passthrough_auth() && !databases().exists(user) {
-                    if let Some(ref passthrough_password) = self.passthrough_password {
-                        let new_user = User::new(&self.user, passthrough_password, &self.database);
-                        databases::add(new_user);
-                    }
-                }
-
-                let databases = databases();
-                let cluster = match databases.cluster(user) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        debug!("cluster lookup failed, attempting wildcard pool creation: {e}");
-                        // Drop the Arc before mutating global state.
-                        drop(databases);
-                        // Attempt wildcard pool creation.
-                        match databases::add_wildcard_pool(
-                            &self.user,
-                            &self.database,
-                            self.passthrough_password.as_deref(),
-                        ) {
-                            Ok(Some(c)) => c,
-                            Ok(None) => {
-                                return Err(Error::NoDatabase(databases::User {
-                                    user: self.user.clone(),
-                                    database: self.database.clone(),
-                                }));
-                            }
-                            Err(e) => return Err(e),
-                        }
-                    }
-                };
-
-                self.cluster = Some(cluster.clone());
-                let source_db = cluster.name();
-
-                // Re-read databases after potential wildcard pool creation.
-                let databases = databases::databases();
-                self.mirrors = databases
-                    .mirrors(user)
-                    .ok()
-                    .flatten()
-                    .unwrap_or(&[])
-                    .iter()
-                    .map(|dest_cluster| {
-                        let mirror_config = databases.mirror_config(source_db, dest_cluster.name());
-                        Mirror::spawn(source_db, dest_cluster, mirror_config)
-                    })
-                    .collect::<Result<Vec<_>, Error>>()?;
-                debug!(
-                    r#"database "{}" has {} mirrors"#,
-                    self.cluster()?.name(),
-                    self.mirrors.len()
-                );
-            }
-
-            _ => (),
+        if matches!(self.binding, Binding::Admin(_)) {
+            return Ok(());
         }
+
+        let user = (self.user.as_str(), self.database.as_str());
+        let cfg = config();
+
+        // Re-create passthrough auth pool on config reload if needed.
+        if cfg.config.general.passthrough_auth() && databases().password(user).is_none() {
+            if let Some(ref cluster) = self.cluster {
+                databases::add(User::new(&self.user, cluster.password(), &self.database))?;
+            }
+        }
+
+        let databases = databases();
+        let cluster = match databases.cluster(user) {
+            Ok(c) => c,
+            Err(e) => {
+                debug!("cluster lookup failed, attempting wildcard pool creation: {e}");
+                // Drop the Arc before mutating global state.
+                drop(databases);
+                // Attempt wildcard pool creation.
+                match databases::add_wildcard_pool(
+                    &self.user,
+                    &self.database,
+                    None,
+                ) {
+                    Ok(Some(c)) => c,
+                    Ok(None) => {
+                        return Err(Error::NoDatabase(databases::User {
+                            user: self.user.clone(),
+                            database: self.database.clone(),
+                        }));
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        };
+
+        self.cluster = Some(cluster.clone());
+        let source_db = cluster.name();
+
+        // Re-read databases after potential wildcard pool creation.
+        let databases = databases::databases();
+        self.mirrors = databases
+            .mirrors(user)?
+            .unwrap_or(&[])
+            .iter()
+            .map(|dest_cluster| {
+                let mirror_config = databases.mirror_config(source_db, dest_cluster.name());
+                Mirror::spawn(source_db, dest_cluster, mirror_config)
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        debug!(
+            r#"database "{}" has {} mirrors"#,
+            self.cluster()?.name(),
+            self.mirrors.len()
+        );
 
         Ok(())
     }
