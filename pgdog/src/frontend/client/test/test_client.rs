@@ -1,7 +1,6 @@
 use std::{fmt::Debug, ops::Deref};
 
 use bytes::{BufMut, Bytes, BytesMut};
-use once_cell::sync::Lazy;
 use pgdog_config::RewriteMode;
 use rand::{rng, Rng};
 use tokio::{

@@ -238,7 +238,20 @@ mod test {
         let cluster = Cluster::new_test(&config());
         cluster.launch();
         let mut mirror = Mirror::spawn("pgdog", &cluster, None).unwrap();
-        let mut conn = cluster.primary(0, &Request::default()).await.unwrap();
+
+        // Wait for pool to be ready — on slower CI runners the initial connections
+        // may not be established before the default checkout_timeout expires.
+        let mut conn = None;
+        for _ in 0..10 {
+            match cluster.primary(0, &Request::default()).await {
+                Ok(c) => {
+                    conn = Some(c);
+                    break;
+                }
+                Err(_) => sleep(Duration::from_millis(500)).await,
+            }
+        }
+        let mut conn = conn.expect("pool should be ready after retries");
 
         for _ in 0..3 {
             assert!(
@@ -264,14 +277,14 @@ mod test {
                 3,
                 "mirror buffer should have 3 requests"
             );
-            sleep(Duration::from_millis(50)).await;
+            sleep(Duration::from_millis(200)).await;
             // Nothing happens until we flush.
             assert!(
                 conn.execute("DROP TABLE pgdog.test_mirror").await.is_err(),
                 "table pgdog.test_mirror shouldn't exist yet"
             );
             assert!(mirror.flush(), "mirror didn't flush");
-            sleep(Duration::from_millis(50)).await;
+            sleep(Duration::from_millis(200)).await;
             assert!(
                 conn.execute("DROP TABLE pgdog.test_mirror").await.is_ok(),
                 "pgdog.test_mirror should exist"
