@@ -8,7 +8,10 @@ use crate::backend::Server;
 use tracing::error;
 
 use super::{Error, Guard, Pool, Request};
-use tokio::{sync::oneshot::{error::RecvError, *}, time::Instant};
+use tokio::{
+    sync::oneshot::{error::RecvError, *},
+    time::Instant,
+};
 
 pub(super) struct Waiting {
     pool: Pool,

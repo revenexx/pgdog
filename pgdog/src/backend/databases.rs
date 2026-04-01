@@ -45,10 +45,7 @@ static STARTUP_ROLES: Lazy<parking_lot::RwLock<HashMap<(String, u16), bool>>> =
 /// Check if a server was identified as a replica during startup detection.
 /// Returns None if detection hasn't run or this server wasn't checked.
 pub fn startup_role(host: &str, port: u16) -> Option<bool> {
-    STARTUP_ROLES
-        .read()
-        .get(&(host.to_string(), port))
-        .copied()
+    STARTUP_ROLES.read().get(&(host.to_string(), port)).copied()
 }
 /// Spawns the wildcard-pool background eviction loop exactly once.
 static WILDCARD_EVICTION: Lazy<()> = Lazy::new(|| {
@@ -220,16 +217,13 @@ pub async fn detect_roles_on_startup() {
             {
                 Ok(Ok(mut server)) => {
                     match server
-                        .fetch_all::<crate::net::DataRow>(
-                            "SELECT pg_is_in_recovery() AS replica",
-                        )
+                        .fetch_all::<crate::net::DataRow>("SELECT pg_is_in_recovery() AS replica")
                         .await
                     {
                         Ok(rows) => {
                             if let Some(row) = rows.into_iter().next() {
                                 use pgdog_postgres_types::Format;
-                                let is_replica: bool =
-                                    row.get(0, Format::Text).unwrap_or(true);
+                                let is_replica: bool = row.get(0, Format::Text).unwrap_or(true);
                                 info!(
                                     "startup role detection: {}:{} is {}",
                                     host,
@@ -518,7 +512,9 @@ pub(crate) fn add_wildcard_pool(
 
         let mut databases = (*databases()).clone();
         if !databases.databases.contains_key(&pool_user) {
-            databases.databases.insert(pool_user.clone(), cluster.clone());
+            databases
+                .databases
+                .insert(pool_user.clone(), cluster.clone());
             databases.wildcard_pool_count += 1;
             databases.dynamic_pools.insert(pool_user);
             databases.launch();

@@ -336,11 +336,7 @@ impl Connection {
                 // Drop the Arc before mutating global state.
                 drop(databases);
                 // Attempt wildcard pool creation.
-                match databases::add_wildcard_pool(
-                    &self.user,
-                    &self.database,
-                    None,
-                ) {
+                match databases::add_wildcard_pool(&self.user, &self.database, None) {
                     Ok(Some(c)) => c,
                     Ok(None) => {
                         return Err(Error::NoDatabase(databases::User {

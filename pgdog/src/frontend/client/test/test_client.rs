@@ -2,7 +2,6 @@ use std::{fmt::Debug, ops::Deref};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use once_cell::sync::Lazy;
-use parking_lot::{Mutex, MutexGuard};
 use pgdog_config::RewriteMode;
 use rand::{rng, Rng};
 use tokio::{
@@ -110,17 +109,11 @@ async fn new_client_pair(params: Parameters) -> (TcpStream, Client) {
 /// Test client.
 #[derive(Debug)]
 pub struct TestClient {
-    _test_guard: MutexGuard<'static, ()>,
     pub(crate) client: Client,
     pub(crate) engine: QueryEngine,
     pub(crate) conn: TcpStream,
     pub(crate) leak_pool: bool,
 }
-
-/// Serialises test-client construction so tests that mutate the global
-/// database/config state don't interfere with each other. Each `TestClient`
-/// holds the guard for its lifetime, preventing concurrent state corruption.
-static TEST_CLIENT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 impl TestClient {
     /// Create new test client after the login phase
@@ -132,7 +125,6 @@ impl TestClient {
         let (conn, client) = new_client_pair(params).await;
 
         Self {
-            _test_guard: test_guard,
             conn,
             engine: QueryEngine::from_client(&client).expect("create query engine from client"),
             client,
