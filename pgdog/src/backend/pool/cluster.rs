@@ -183,7 +183,17 @@ impl<'a> ClusterConfig<'a> {
             shards,
             sharded_tables,
             multi_tenant,
-            rw_strategy: general.read_write_strategy,
+            // Per-user override mirrors the cross_shard_disabled / two_pc
+            // pattern below: if the [[users]] block sets
+            // `read_write_strategy = "..."`, use that; otherwise fall back
+            // to the global `[general]` setting. Used to pin a single
+            // user's session traffic to the primary (e.g. PostgREST's
+            // LISTEN connection, which won't operate over a replica)
+            // without flipping the entire cluster off read-replica
+            // fanout.
+            rw_strategy: user
+                .read_write_strategy
+                .unwrap_or(general.read_write_strategy),
             rw_split: general.read_write_split,
             schema_admin: user.schema_admin,
             cross_shard_disabled: user

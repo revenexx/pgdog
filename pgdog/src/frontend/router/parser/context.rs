@@ -74,7 +74,17 @@ impl<'a> QueryParserContext<'a> {
     }
 
     /// Write override enabled?
+    ///
+    /// `rw_primary_only` short-circuits this to true unconditionally —
+    /// pinning every query of that user/cluster to the primary, which
+    /// is what clients like PostgREST need for their LISTEN connection
+    /// (the client checks `pg_is_in_recovery()` and refuses replicas
+    /// before any LISTEN is issued, so PgDog's pub/sub broadcast never
+    /// gets a chance otherwise).
     pub(super) fn write_override(&self) -> bool {
+        if self.rw_primary_only() {
+            return true;
+        }
         matches!(
             self.router_context.transaction(),
             Some(TransactionType::ReadWrite)
@@ -85,6 +95,11 @@ impl<'a> QueryParserContext<'a> {
     /// Are we using the conservative read/write separation strategy?
     pub(super) fn rw_conservative(&self) -> bool {
         self.rw_strategy == &ReadWriteStrategy::Conservative
+    }
+
+    /// Are we using the primary-only routing strategy?
+    pub(super) fn rw_primary_only(&self) -> bool {
+        self.rw_strategy == &ReadWriteStrategy::PrimaryOnly
     }
 
     /// We need to parse queries using pg_query.

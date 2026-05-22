@@ -238,6 +238,18 @@ pub struct User {
     pub two_phase_commit_auto: Option<bool>,
     /// Server connections older than this (in milliseconds) will be closed when returned to the pool.
     pub server_lifetime: Option<u64>,
+    /// Overrides [`read_write_strategy`](https://docs.pgdog.dev/configuration/pgdog.toml/general/#read_write_strategy)
+    /// for this user. Useful for clients that need to pin their entire
+    /// session to the primary regardless of query content — e.g.
+    /// PostgREST, which probes `transaction_read_only` at connection
+    /// setup and bails if its LISTEN connection lands on a replica even
+    /// though PgDog's pub/sub feature would otherwise broker the
+    /// notifications correctly.
+    ///
+    /// When unset, the user inherits the global `read_write_strategy`
+    /// from `pgdog.toml`'s `[general]`. Set to `"primary_only"` to
+    /// pin the user; other values mirror the global strategies.
+    pub read_write_strategy: Option<super::database::ReadWriteStrategy>,
 }
 
 impl User {

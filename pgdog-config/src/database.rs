@@ -11,7 +11,20 @@ use super::pooling::PoolerMode;
 /// How aggressive the query parser should be in determining read vs. write queries.
 ///
 /// https://docs.pgdog.dev/configuration/pgdog.toml/general/#read_write_strategy
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Copy, JsonSchema)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Copy,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ReadWriteStrategy {
     /// Transactions are writes, standalone `SELECT` are reads (default).
@@ -19,15 +32,28 @@ pub enum ReadWriteStrategy {
     Conservative,
     /// Use first statement inside a transaction for determining query route.
     Aggressive,
+    /// Pin every query to the primary regardless of classification.
+    ///
+    /// Used for clients that cannot tolerate landing on a replica even
+    /// briefly — e.g. PostgREST, whose LISTEN connection probes
+    /// `pg_is_in_recovery()` at startup and bails when it returns
+    /// `true`. With PgDog's pub/sub feature the LISTEN itself would
+    /// still work via the broadcast channel, but the client never
+    /// gets that far because its own check fires first.
+    ///
+    /// Settable globally in `[general]` or per-user in `[[users]]`;
+    /// the per-user value wins.
+    PrimaryOnly,
 }
 
 impl FromStr for ReadWriteStrategy {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
+        match s.to_lowercase().replace(['-', '_'], "").as_str() {
             "conservative" => Ok(Self::Conservative),
             "aggressive" => Ok(Self::Aggressive),
+            "primaryonly" => Ok(Self::PrimaryOnly),
             _ => Err(format!("Invalid read-write strategy: {}", s)),
         }
     }
