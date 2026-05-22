@@ -76,6 +76,12 @@ impl ShardMonitor {
                     self.shard.number(),
                     self.shard.identifier()
                 );
+                // Rebind the pub/sub listener (if any) to the new primary.
+                // Without this the listener keeps talking to the former
+                // primary, which is now read-only — every NOTIFY through
+                // it would fail and every LISTEN subscriber would silently
+                // miss notifications. See `Shard::reinit_pub_sub`.
+                self.shard.reinit_pub_sub();
             }
 
             let pool_with_stats = self

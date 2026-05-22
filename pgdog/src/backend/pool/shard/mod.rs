@@ -3,6 +3,8 @@
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
+
+use arc_swap::ArcSwapOption;
 use tokio::sync::{broadcast, OnceCell};
 use tokio::{select, spawn, sync::Notify};
 use tracing::{debug, info};
@@ -109,7 +111,7 @@ impl Shard {
         &self,
         channel: &str,
     ) -> Result<broadcast::Receiver<NotificationResponse>, Error> {
-        if let Some(ref listener) = self.pub_sub {
+        if let Some(listener) = self.pub_sub.load_full() {
             listener.listen(channel).await
         } else {
             Err(Error::PubSubDisabled)
@@ -118,7 +120,7 @@ impl Shard {
 
     /// Notify channel with optional payload (payload can be empty string).
     pub async fn notify(&self, channel: &str, payload: &str) -> Result<(), Error> {
-        if let Some(ref listener) = self.pub_sub {
+        if let Some(listener) = self.pub_sub.load_full() {
             listener.notify(channel, payload).await
         } else {
             Err(Error::PubSubDisabled)
@@ -148,7 +150,7 @@ impl Shard {
     pub fn launch(&self) {
         self.lb.launch();
         ShardMonitor::run(self);
-        if let Some(ref listener) = self.pub_sub {
+        if let Some(listener) = self.pub_sub.load_full() {
             listener.launch();
         }
     }
@@ -208,7 +210,7 @@ impl Shard {
     /// Shutdown every pool and maintenance task in this shard.
     pub fn shutdown(&self) {
         self.comms.shutdown.notify_waiters();
-        if let Some(ref listener) = self.pub_sub {
+        if let Some(listener) = self.pub_sub.load_full() {
             listener.shutdown();
         }
         self.lb.shutdown();
@@ -237,6 +239,38 @@ impl Shard {
         self.lb.redetect_roles()
     }
 
+    /// Rebuild the shard's pub/sub listener against whichever pool the load
+    /// balancer currently considers primary, atomically swapping it for the
+    /// previous one (if any) and shutting that one down.
+    ///
+    /// Called after `redetect_roles()` has reshuffled which target is
+    /// primary — typically because a Patroni failover promoted a former
+    /// replica. Without this re-bind, the listener stays pointed at a
+    /// node that no longer accepts the writes which back NOTIFY, leaving
+    /// every subscribed client silently desynced after the next failover.
+    ///
+    /// No-op when pub/sub is disabled in the global config OR when no
+    /// primary is currently detected — in both cases the existing
+    /// listener (if any) is shut down and the slot is left empty until
+    /// the next promotion. That mirrors the startup logic in
+    /// `ShardInner::new`.
+    pub fn reinit_pub_sub(&self) {
+        if !config().pub_sub_enabled() {
+            return;
+        }
+        let next = self
+            .lb
+            .primary()
+            .map(|pool| Arc::new(PubSubListener::new(pool)));
+        if let Some(ref listener) = next {
+            listener.launch();
+        }
+        let previous = self.pub_sub.swap(next);
+        if let Some(previous) = previous {
+            previous.shutdown();
+        }
+    }
+
     /// Get parameters from first available connection pool.
     pub async fn params(&self, request: &Request) -> Result<&Parameters, Error> {
         self.lb.params(request).await
@@ -253,12 +287,20 @@ impl Deref for Shard {
 
 /// Shard connection pools
 /// and internal state.
-#[derive(Default, Debug, Clone)]
+///
+/// `pub_sub` is held in an `ArcSwapOption` so the listener can be replaced
+/// at runtime: when the role detector sees a primary swap (e.g. Patroni
+/// failover), `reinit_pub_sub` rebuilds the listener against the new
+/// primary and atomically swaps it in without locking the rest of the
+/// shard. Without this, a listener bound at startup would either stay
+/// pointed at a now-demoted node or — more often, since `role = "auto"`
+/// in our typical config — never be created at all.
+#[derive(Default, Debug)]
 pub struct ShardInner {
     number: usize,
     lb: LoadBalancer,
     comms: Arc<ShardComms>,
-    pub_sub: Option<PubSubListener>,
+    pub_sub: ArcSwapOption<PubSubListener>,
     identifier: Arc<User>,
     schema: Arc<OnceCell<Schema>>,
 }
@@ -280,8 +322,22 @@ impl ShardInner {
             shutdown: Notify::new(),
             lsn_check_interval,
         });
+
+        // Initial pub/sub listener: bind it to whatever the load balancer
+        // currently considers the primary, NOT the static config-supplied
+        // primary. When the operator runs the pooler with `role = "auto"`
+        // (typical for Patroni HA), the supplied `primary` is `None` —
+        // every backend lands in `replicas`. The LoadBalancer constructor
+        // already consults the startup role-detection cache (see the
+        // companion patch in `backend/databases.rs` +
+        // `backend/pool/lb/mod.rs`) and re-tags the detected-primary pool
+        // as such. Reading from `lb.primary()` here picks that up so we
+        // do not start with pub_sub permanently disabled.
+        //
+        // The listener can later be rebuilt by `Shard::reinit_pub_sub`
+        // when the role detector promotes a different node.
         let pub_sub = if config().pub_sub_enabled() {
-            primary.as_ref().map(PubSubListener::new)
+            lb.primary().map(|pool| Arc::new(PubSubListener::new(pool)))
         } else {
             None
         };
@@ -290,7 +346,7 @@ impl ShardInner {
             number,
             lb,
             comms,
-            pub_sub,
+            pub_sub: ArcSwapOption::from(pub_sub),
             identifier,
             schema: Arc::new(OnceCell::new()),
         }
