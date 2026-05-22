@@ -233,8 +233,24 @@ impl LoadBalancer {
         }
     }
 
-    /// Get parameters from first non-banned connection pool.
+    /// Get parameters to forward to the client at connection setup.
+    ///
+    /// Prefer the primary when one exists: ParameterStatus messages
+    /// (notably `in_hot_standby` and `default_transaction_read_only`)
+    /// are sent to the client BEFORE any query routing happens, and
+    /// libpq's `target_session_attrs=read-write` check fires on those
+    /// alone. A replica's parameters would say "this is read-only",
+    /// causing libpq to fail the connection with "session is read-only"
+    /// even when query routing would otherwise pin the client's actual
+    /// statements to the primary.
+    ///
+    /// Falling back to any non-banned target preserves the prior
+    /// behaviour for replica-only clusters and for the period during
+    /// which a primary is not yet detected.
     pub async fn params(&self, request: &Request) -> Result<&Parameters, Error> {
+        if let Some(primary) = self.primary_target().filter(|target| !target.ban.banned()) {
+            return primary.pool.params(request).await;
+        }
         if let Some(target) = self.targets.iter().find(|target| !target.ban.banned()) {
             return target.pool.params(request).await;
         }
