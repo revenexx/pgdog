@@ -318,9 +318,16 @@ describe 'tcp' do
               end
               expect(errors).to be <= 2
 
-              sleep 0.05
-              banned_pools = admin.exec('SHOW POOLS').select do |pool|
-                pool['database'] == 'failover' && pool['banned'] == 't'
+              # Bans are applied by the load balancer monitor, which ticks
+              # every 333ms. Poll instead of a fixed short sleep so the
+              # assertion does not depend on where that tick falls.
+              banned_pools = []
+              20.times do
+                sleep 0.05
+                banned_pools = admin.exec('SHOW POOLS').select do |pool|
+                  pool['database'] == 'failover' && pool['banned'] == 't'
+                end
+                break unless banned_pools.empty?
               end
               expect(banned_pools.size).to be >= 1
             end
