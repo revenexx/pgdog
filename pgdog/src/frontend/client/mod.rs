@@ -170,7 +170,7 @@ impl Client {
                 Password::from_bytes(password.to_bytes()?)?
             };
 
-            if !exists && !wildcard_available {
+            if !wildcard_available {
                 let user = user_from_params(&params, &password).ok();
                 if let Some(user) = user {
                     databases::add(user)?;
